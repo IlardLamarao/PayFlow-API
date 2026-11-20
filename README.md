@@ -30,15 +30,24 @@ pytest
 
 ```
 app/
-├── main.py         # app FastAPI, Swagger e tratamento global de erros
+├── main.py         # app FastAPI, os 4 endpoints, Swagger e tratamento global de erros
 ├── schemas.py      # DTOs de entrada, saída e erro
-├── services.py     # regras de negócio (Parte 2)
+├── services.py     # regras de negócio (criar, extrato, pagar, cancelar)
 ├── database.py     # engine SQLite e modelo ORM
 ├── exceptions.py   # exceções de domínio (400/404/409)
 ├── validators.py   # validação de CPF/CNPJ
 └── pix.py          # gerador de BR Code (Pix copia-e-cola) com CRC16
 tests/
 ```
+
+## Endpoints
+
+| Verbo | Rota | Sucesso | Erros |
+|---|---|---|---|
+| POST | `/api/v1/faturas` | 201 + `FaturaDTO` com Pix | 400 (valor <= 0, vencimento no passado, CPF/CNPJ inválido) |
+| GET | `/api/v1/clientes/{cnpj_cpf}/extrato` | 200 + `ExtratoClienteDTO` | 400 (documento inválido), 404 (cliente sem faturas) |
+| PUT | `/api/v1/faturas/{id_fatura}/pagar` | 200 + `FaturaDTO` (PAGA) | 400 (já PAGA/CANCELADA, forma de pagamento inválida), 404 |
+| DELETE | `/api/v1/faturas/{id_fatura}` | 200 + `CancelamentoDTO` | 400 (já PAGA ou CANCELADA), 404 |
 
 ## Formato de erro
 
@@ -59,5 +68,5 @@ A chave Pix e o recebedor são fictícios. Para alterar:
 ## Status do desenvolvimento
 
 - [x] **Parte 1:** base do projeto, DTOs, banco, validadores, gerador Pix e erros globais
-- [ ] **Parte 2:** services e os 4 endpoints
+- [x] **Parte 2:** services e os 4 endpoints
 - [ ] **Parte 3:** coleção Postman, revisão do Swagger e README final
