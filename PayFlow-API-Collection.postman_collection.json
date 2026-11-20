@@ -1,0 +1,613 @@
+{
+  "info": {
+    "_postman_id": "6b0c7a52-8f4e-4d4b-9a3c-1f2e7d9a0b11",
+    "name": "PayFlow API - Marco 1",
+    "description": "Coleção da PayFlow API (Domínio 7 - fintech). Cobre os casos 200/201/400/404 dos 4 endpoints.\n\n**Como usar:** suba a API (`uvicorn app.main:app --reload`) e rode a coleção inteira no *Collection Runner*, na ordem das pastas. As requisições de criação gravam os IDs gerados nas variáveis `id_fatura`, `id_fatura_cnpj` e `id_fatura_cancelar`, usadas pelas seguintes.\n\nAs datas `vencimento_futuro`, `vencimento_hoje` e `vencimento_passado` são calculadas no script de pré-requisição da coleção (fuso de Belém, UTC-3).\n\nVariáveis: `base_url`, `cpf`, `cpf_mascara`, `cnpj`, `cnpj_mascara`, `cpf_sem_faturas`, `id_inexistente`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Datas no fuso de Belém (UTC-3), o mesmo usado pela API na regra de vencimento.",
+          "const dia = 24 * 60 * 60 * 1000;",
+          "const hojeBelem = Date.now() - 3 * 60 * 60 * 1000;",
+          "const iso = (ms) => new Date(ms).toISOString().slice(0, 10);",
+          "pm.collectionVariables.set('vencimento_hoje', iso(hojeBelem));",
+          "pm.collectionVariables.set('vencimento_futuro', iso(hojeBelem + 30 * dia));",
+          "pm.collectionVariables.set('vencimento_passado', iso(hojeBelem - dia));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Toda resposta de erro deve seguir o JSON padronizado da ficha, sem stack trace.",
+          "if (pm.response.code >= 400) {",
+          "    pm.test('Erro no formato padrão {codigo_erro, mensagem, timestamp}', function () {",
+          "        const corpo = pm.response.json();",
+          "        pm.expect(Object.keys(corpo).sort()).to.eql(['codigo_erro', 'mensagem', 'timestamp']);",
+          "        pm.expect(corpo.timestamp).to.match(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/);",
+          "        pm.expect(pm.response.text()).to.not.include('Traceback');",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Gerar fatura - POST /api/v1/faturas",
+      "item": [
+        {
+          "name": "201 - Gerar fatura (CPF com máscara)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const f = pm.response.json();",
+                  "pm.test('Fatura PENDENTE com ID FAT-{ano}-{seq}', () => {",
+                  "    pm.expect(f.id_fatura).to.match(/^FAT-\\d{4}-\\d{3,}$/);",
+                  "    pm.expect(f.status).to.eql('PENDENTE');",
+                  "    pm.expect(f.data_pagamento).to.be.null;",
+                  "});",
+                  "pm.test('Pix copia-e-cola (BR Code) gerado', () => {",
+                  "    pm.expect(f.linha_digitavel_pix).to.match(/^000201/);",
+                  "    pm.expect(f.linha_digitavel_pix).to.include('br.gov.bcb.pix');",
+                  "    pm.expect(f.linha_digitavel_pix).to.include('6304');",
+                  "});",
+                  "pm.collectionVariables.set('id_fatura', f.id_fatura);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_cnpj_cpf\": \"{{cpf_mascara}}\",\n  \"cliente_nome\": \"Maria das Dores Souza\",\n  \"valor_reais\": 450.00,\n  \"data_vencimento\": \"{{vencimento_futuro}}\",\n  \"descricao\": \"Mensalidade de novembro/2026\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas"] },
+            "description": "Cria uma fatura PENDENTE. O ID gerado é salvo em `id_fatura`."
+          }
+        },
+        {
+          "name": "201 - Gerar fatura (CNPJ com máscara)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const f = pm.response.json();",
+                  "pm.test('Fatura PENDENTE', () => pm.expect(f.status).to.eql('PENDENTE'));",
+                  "pm.collectionVariables.set('id_fatura_cnpj', f.id_fatura);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_cnpj_cpf\": \"{{cnpj_mascara}}\",\n  \"cliente_nome\": \"Comercial Ver-o-Peso LTDA\",\n  \"valor_reais\": 1890.90,\n  \"data_vencimento\": \"{{vencimento_futuro}}\",\n  \"descricao\": \"Licença anual do sistema PayFlow\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas"] },
+            "description": "CNPJ enviado com máscara; a API normaliza para só dígitos. O ID é salvo em `id_fatura_cnpj`."
+          }
+        },
+        {
+          "name": "201 - Gerar fatura com vencimento hoje",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created (vencimento hoje é válido)', () => pm.response.to.have.status(201));",
+                  "const f = pm.response.json();",
+                  "pm.test('data_vencimento igual a hoje', () => pm.expect(f.data_vencimento).to.eql(pm.collectionVariables.get('vencimento_hoje')));",
+                  "pm.collectionVariables.set('id_fatura_cancelar', f.id_fatura);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_cnpj_cpf\": \"{{cpf}}\",\n  \"cliente_nome\": \"Maria das Dores Souza\",\n  \"valor_reais\": 99.90,\n  \"data_vencimento\": \"{{vencimento_hoje}}\",\n  \"descricao\": \"Taxa de adesão\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas"] },
+            "description": "Vencimento no dia de hoje é aceito. O ID é salvo em `id_fatura_cancelar` (usado na pasta de cancelamento)."
+          }
+        },
+        {
+          "name": "400 - valor_reais igual a zero",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('codigo_erro REQUISICAO_INVALIDA citando valor_reais', () => {",
+                  "    const e = pm.response.json();",
+                  "    pm.expect(e.codigo_erro).to.eql('REQUISICAO_INVALIDA');",
+                  "    pm.expect(e.mensagem).to.include('valor_reais');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_cnpj_cpf\": \"{{cpf}}\",\n  \"cliente_nome\": \"Maria das Dores Souza\",\n  \"valor_reais\": 0,\n  \"data_vencimento\": \"{{vencimento_futuro}}\",\n  \"descricao\": \"Valor inválido\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas"] }
+          }
+        },
+        {
+          "name": "400 - Vencimento no passado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('codigo_erro VENCIMENTO_NO_PASSADO', () => pm.expect(pm.response.json().codigo_erro).to.eql('VENCIMENTO_NO_PASSADO'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_cnpj_cpf\": \"{{cpf}}\",\n  \"cliente_nome\": \"Maria das Dores Souza\",\n  \"valor_reais\": 450.00,\n  \"data_vencimento\": \"{{vencimento_passado}}\",\n  \"descricao\": \"Vencimento ontem\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas"] }
+          }
+        },
+        {
+          "name": "400 - CPF inválido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('Mensagem cita cliente_cnpj_cpf', () => pm.expect(pm.response.json().mensagem).to.include('cliente_cnpj_cpf'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_cnpj_cpf\": \"123.456.789-00\",\n  \"cliente_nome\": \"Maria das Dores Souza\",\n  \"valor_reais\": 450.00,\n  \"data_vencimento\": \"{{vencimento_futuro}}\",\n  \"descricao\": \"Documento com dígitos verificadores errados\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas"] }
+          }
+        },
+        {
+          "name": "400 - Campo obrigatório ausente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 (e não 422)', () => pm.response.to.have.status(400));",
+                  "pm.test('Mensagem cita descricao', () => pm.expect(pm.response.json().mensagem).to.include('descricao'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_cnpj_cpf\": \"{{cpf}}\",\n  \"cliente_nome\": \"Maria das Dores Souza\",\n  \"valor_reais\": 450.00,\n  \"data_vencimento\": \"{{vencimento_futuro}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Consultar extrato - GET /api/v1/clientes/{cnpj_cpf}/extrato",
+      "item": [
+        {
+          "name": "200 - Extrato do cliente (CPF)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const ex = pm.response.json();",
+                  "pm.test('Estrutura do ExtratoClienteDTO', () => {",
+                  "    pm.expect(ex).to.have.all.keys('cliente_cnpj_cpf', 'cliente_nome', 'total_pendente_reais', 'total_pago_reais', 'faturas');",
+                  "    pm.expect(ex.cliente_cnpj_cpf).to.eql(pm.collectionVariables.get('cpf'));",
+                  "    pm.expect(ex.faturas).to.be.an('array').that.is.not.empty;",
+                  "});",
+                  "pm.test('Totais batem com as faturas PENDENTE e PAGA', () => {",
+                  "    const soma = (st) => Math.round(ex.faturas.filter(f => f.status === st).reduce((t, f) => t + f.valor_reais, 0) * 100) / 100;",
+                  "    pm.expect(ex.total_pendente_reais).to.eql(soma('PENDENTE'));",
+                  "    pm.expect(ex.total_pago_reais).to.eql(soma('PAGA'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/clientes/{{cpf}}/extrato", "host": ["{{base_url}}"], "path": ["api", "v1", "clientes", "{{cpf}}", "extrato"] }
+          }
+        },
+        {
+          "name": "200 - Extrato com CPF mascarado na URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Documento devolvido sem máscara', () => pm.expect(pm.response.json().cliente_cnpj_cpf).to.eql(pm.collectionVariables.get('cpf')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/clientes/{{cpf_mascara}}/extrato", "host": ["{{base_url}}"], "path": ["api", "v1", "clientes", "{{cpf_mascara}}", "extrato"] },
+            "description": "A busca ignora a máscara do CPF (pontos e hífen)."
+          }
+        },
+        {
+          "name": "200 - Extrato do cliente (CNPJ)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Fatura do CNPJ cadastrado com máscara é encontrada', () => {",
+                  "    const ex = pm.response.json();",
+                  "    pm.expect(ex.cliente_cnpj_cpf).to.eql(pm.collectionVariables.get('cnpj'));",
+                  "    pm.expect(ex.faturas.map(f => f.id_fatura)).to.include(pm.collectionVariables.get('id_fatura_cnpj'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/clientes/{{cnpj}}/extrato", "host": ["{{base_url}}"], "path": ["api", "v1", "clientes", "{{cnpj}}", "extrato"] },
+            "description": "Na URL o CNPJ vai só com dígitos, pois a barra da máscara (`/`) seria lida como separador de rota."
+          }
+        },
+        {
+          "name": "400 - Documento inválido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('codigo_erro DOCUMENTO_INVALIDO', () => pm.expect(pm.response.json().codigo_erro).to.eql('DOCUMENTO_INVALIDO'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/clientes/123/extrato", "host": ["{{base_url}}"], "path": ["api", "v1", "clientes", "123", "extrato"] }
+          }
+        },
+        {
+          "name": "404 - Cliente sem faturas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('codigo_erro CLIENTE_SEM_FATURAS', () => pm.expect(pm.response.json().codigo_erro).to.eql('CLIENTE_SEM_FATURAS'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/clientes/{{cpf_sem_faturas}}/extrato", "host": ["{{base_url}}"], "path": ["api", "v1", "clientes", "{{cpf_sem_faturas}}", "extrato"] },
+            "description": "CPF válido, mas sem nenhuma fatura cadastrada."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Registrar pagamento - PUT /api/v1/faturas/{id_fatura}/pagar",
+      "item": [
+        {
+          "name": "200 - Pagar fatura via PIX",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const f = pm.response.json();",
+                  "pm.test('Fatura PAGA com data_pagamento gravada', () => {",
+                  "    pm.expect(f.status).to.eql('PAGA');",
+                  "    pm.expect(f.data_pagamento).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"forma_pagamento\": \"PIX\",\n  \"codigo_comprovante\": \"TRX998123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_fatura}}/pagar", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_fatura}}", "pagar"] }
+          }
+        },
+        {
+          "name": "400 - Fatura já paga",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('codigo_erro FATURA_JA_PAGA', () => pm.expect(pm.response.json().codigo_erro).to.eql('FATURA_JA_PAGA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"forma_pagamento\": \"BOLETO\",\n  \"codigo_comprovante\": \"TRX998124\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_fatura}}/pagar", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_fatura}}", "pagar"] },
+            "description": "Segunda tentativa de pagar a mesma fatura."
+          }
+        },
+        {
+          "name": "400 - forma_pagamento inválida",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('Mensagem cita forma_pagamento', () => pm.expect(pm.response.json().mensagem).to.include('forma_pagamento'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"forma_pagamento\": \"CARTAO\",\n  \"codigo_comprovante\": \"TRX998125\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_fatura_cnpj}}/pagar", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_fatura_cnpj}}", "pagar"] },
+            "description": "Somente PIX e BOLETO são aceitos."
+          }
+        },
+        {
+          "name": "404 - Fatura inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('codigo_erro FATURA_NAO_ENCONTRADA', () => pm.expect(pm.response.json().codigo_erro).to.eql('FATURA_NAO_ENCONTRADA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"forma_pagamento\": \"PIX\",\n  \"codigo_comprovante\": \"TRX000001\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_inexistente}}/pagar", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_inexistente}}", "pagar"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Cancelar fatura - DELETE /api/v1/faturas/{id_fatura}",
+      "item": [
+        {
+          "name": "200 - Cancelar fatura pendente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('CancelamentoDTO com status CANCELADA', () => {",
+                  "    const c = pm.response.json();",
+                  "    pm.expect(c.status).to.eql('CANCELADA');",
+                  "    pm.expect(c.id_fatura).to.eql(pm.collectionVariables.get('id_fatura_cancelar'));",
+                  "    pm.expect(c.mensagem).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_fatura_cancelar}}", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_fatura_cancelar}}"] }
+          }
+        },
+        {
+          "name": "400 - Fatura já cancelada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('codigo_erro FATURA_JA_CANCELADA', () => pm.expect(pm.response.json().codigo_erro).to.eql('FATURA_JA_CANCELADA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_fatura_cancelar}}", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_fatura_cancelar}}"] }
+          }
+        },
+        {
+          "name": "400 - Fatura já paga não pode ser cancelada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('codigo_erro FATURA_JA_PAGA', () => pm.expect(pm.response.json().codigo_erro).to.eql('FATURA_JA_PAGA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_fatura}}", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_fatura}}"] },
+            "description": "Usa a fatura paga na pasta 3."
+          }
+        },
+        {
+          "name": "404 - Fatura inexistente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('codigo_erro FATURA_NAO_ENCONTRADA', () => pm.expect(pm.response.json().codigo_erro).to.eql('FATURA_NAO_ENCONTRADA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/faturas/{{id_inexistente}}", "host": ["{{base_url}}"], "path": ["api", "v1", "faturas", "{{id_inexistente}}"] }
+          }
+        },
+        {
+          "name": "200 - Extrato mantém a cancelada fora dos totais",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const ex = pm.response.json();",
+                  "const cancelada = ex.faturas.find(f => f.id_fatura === pm.collectionVariables.get('id_fatura_cancelar'));",
+                  "pm.test('Fatura cancelada continua listada', () => pm.expect(cancelada.status).to.eql('CANCELADA'));",
+                  "pm.test('Totais ignoram as CANCELADAS', () => {",
+                  "    const soma = (st) => Math.round(ex.faturas.filter(f => f.status === st).reduce((t, f) => t + f.valor_reais, 0) * 100) / 100;",
+                  "    pm.expect(ex.total_pendente_reais).to.eql(soma('PENDENTE'));",
+                  "    pm.expect(ex.total_pago_reais).to.eql(soma('PAGA'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/clientes/{{cpf}}/extrato", "host": ["{{base_url}}"], "path": ["api", "v1", "clientes", "{{cpf}}", "extrato"] },
+            "description": "Conferência final: a exclusão é lógica, então a fatura cancelada aparece no extrato, mas fora dos totais."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8000" },
+    { "key": "cpf", "value": "52998224725" },
+    { "key": "cpf_mascara", "value": "529.982.247-25" },
+    { "key": "cnpj", "value": "11222333000181" },
+    { "key": "cnpj_mascara", "value": "11.222.333/0001-81" },
+    { "key": "cpf_sem_faturas", "value": "11144477735" },
+    { "key": "id_inexistente", "value": "FAT-2026-999999" },
+    { "key": "id_fatura", "value": "" },
+    { "key": "id_fatura_cnpj", "value": "" },
+    { "key": "id_fatura_cancelar", "value": "" },
+    { "key": "vencimento_hoje", "value": "" },
+    { "key": "vencimento_futuro", "value": "" },
+    { "key": "vencimento_passado", "value": "" }
+  ]
+}
